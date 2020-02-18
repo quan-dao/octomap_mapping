@@ -53,6 +53,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFactor(0.8),
   m_latchedTopics(true),
   m_publishFreeSpace(false),
+  m_publishConflictCells(false),  // puslish visualization for conflict cells
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -158,6 +159,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFree.a = a;
 
   m_nh_private.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
+  m_nh_private.param("publish_conflict_cells", m_publishConflictCells, m_publishConflictCells);
 
   m_nh_private.param("latch", m_latchedTopics, m_latchedTopics);
   if (m_latchedTopics){
@@ -171,6 +173,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
+  m_cmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("conflict_cells_vis_array", 1, m_latchedTopics);
 
   m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
   m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
@@ -493,6 +496,7 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   }
 
   bool publishFreeMarkerArray = m_publishFreeSpace && (m_latchedTopics || m_fmarkerPub.getNumSubscribers() > 0);
+  bool publishConflictMarkerArray = m_publishConflictCells && (m_latchedTopics || m_cmarkerPub.getNumSubscribers() > 0);
   bool publishMarkerArray = (m_latchedTopics || m_markerPub.getNumSubscribers() > 0);
   bool publishPointCloud = (m_latchedTopics || m_pointCloudPub.getNumSubscribers() > 0);
   bool publishBinaryMap = (m_latchedTopics || m_binaryMapPub.getNumSubscribers() > 0);
@@ -503,6 +507,11 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   visualization_msgs::MarkerArray freeNodesVis;
   // each array stores all cubes of a different size, one for each depth level:
   freeNodesVis.markers.resize(m_treeDepth+1);
+
+  // init markers for conflict cells:
+  visualization_msgs::MarkerArray conflictNodesVis;
+  // Need only one array to store all cubes representing conflict cells since they are all at leaf level:
+  conflictNodesVis.markers.resize(1);
 
   geometry_msgs::Pose pose;
   pose.orientation = tf::createQuaternionMsgFromYaw(0.0);
@@ -680,6 +689,39 @@ void OctomapServer::publishAll(const ros::Time& rostime){
 
     m_fmarkerPub.publish(freeNodesVis);
   }
+
+#ifndef COLOR_OCTOMAP_SERVER
+  // making ConflictMarkerArray
+  if (publishConflictMarkerArray){
+    if (!m_octree->conflict_cells_center.empty()) {
+      // add cube center
+      for (point3d _p : m_octree->conflict_cells_center){
+        geometry_msgs::Point center_;
+        center_.x = (double) _p.x();
+        center_.y = (double) _p.y();
+        center_.z = (double) _p.z();
+        conflictNodesVis.markers[0].points.push_back(center_);
+      }
+      // clear out conflict_cells_center for next update
+      m_octree->conflict_cells_center.clear();
+    }
+    
+    // finish ConflictMarkerArray
+    conflictNodesVis.markers[0].header.frame_id = m_worldFrameId;
+    conflictNodesVis.markers[0].header.stamp = rostime;
+    conflictNodesVis.markers[0].ns = "map";
+    conflictNodesVis.markers[0].id = 0;
+    conflictNodesVis.markers[0].type = visualization_msgs::Marker::CUBE_LIST;
+    conflictNodesVis.markers[0].scale.x = m_octree->getResolution();
+    conflictNodesVis.markers[0].scale.y = m_octree->getResolution();
+    conflictNodesVis.markers[0].scale.z = m_octree->getResolution();
+
+    if (conflictNodesVis.markers[0].points.size() > 0)
+        conflictNodesVis.markers[0].action = visualization_msgs::Marker::ADD;
+      else
+        conflictNodesVis.markers[0].action = visualization_msgs::Marker::DELETE;
+  }
+#endif
 
 
   // finish pointcloud:

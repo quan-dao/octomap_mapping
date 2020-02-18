@@ -150,6 +150,8 @@ namespace octomap {
 		void upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicBeliefAssign, const OcTreeKey& key);
 		
 		void setIncomingTime(const ros::Time& _time) {incomingTime = _time;}
+		
+		std::vector<point3d> conflict_cells_center;	
 
 	protected:
 		// Evidential Fusion constants
@@ -157,7 +159,6 @@ namespace octomap {
 		const float lambda_occupied = 0.7f;
 		const float lambda_free = 0.7f;
 		const float conflict_thres = 0.25f;
-		std::vector<point3d> conflict_cells_center;
 
 		// timestamp of incoming pointcloud. This is updated in callback function "insertCloudCallback"
 		ros::Time incomingTime;  

@@ -124,6 +124,8 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 	node->setUpdatedTime(incomingTime);
 
 	float alpha = exp(-(float) time_elapsed / tau);
+	// if (alpha == 0.0f)
+	// 	ROS_INFO("Alpha equal to zero");
 
 	// decay mass
 	node->decayMass(alpha);
@@ -135,8 +137,12 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 	float f_i = node->getMassPtr()->i() * basicBeliefAssign.i();
 
 	// TODO: Get 3d coord of cells having high conflict mass
-	if(f_c > conflict_thres) {
+	std::cout << "f_c = " << f_c << "\n";
+	if(f_c > 0.15) {
+		point3d p_ = keyToCoord(key);
+		conflict_cells_center.push_back(p_);
 		// Do something
+		ROS_INFO("Detect conflict cells at (%f, %f, %f)", p_.x(), p_.y(), p_.z());
 	} 
 
 	// Dempster normalization
