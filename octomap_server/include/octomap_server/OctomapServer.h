@@ -224,7 +224,7 @@ protected:
 
   bool m_latchedTopics;
   bool m_publishFreeSpace;
-  bool m_publishConflictCells;
+  bool m_publishConfCells;
 
   double m_res;
   unsigned m_treeDepth;
