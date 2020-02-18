@@ -260,7 +260,10 @@ bool OctomapServer::openFile(const std::string& filename){
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud){
   ros::WallTime startTime = ros::WallTime::now();
-
+  #ifndef COLOR_OCTOMAP_SERVER
+  // update inComingTime of the octree
+  m_octree->setIncomingTime(cloud->header.stamp);
+  #endif
 
   //
   // ground filtering in base frame
