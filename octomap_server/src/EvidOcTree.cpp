@@ -91,6 +91,9 @@ EvidOcTreeNode* EvidOcTree::updateNodeRecurs(EvidOcTreeNode* node, bool node_jus
 				// not a pruned node, create requested child
 				this->createNodeChild(node, pos);
 				created_node = true;
+				// init child's updatedTime
+				EvidOcTreeNode* child = getNodeChild(node, pos);
+				child->setUpdatedTime(incomingTime);
 			}
 		}
 
@@ -124,6 +127,8 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 	node->setUpdatedTime(incomingTime);
 
 	float alpha = exp(-(float) time_elapsed / tau);
+	// if (alpha == 0.0f)
+		// ROS_WARN("Alpha equals to zero");
 
 	// decay mass
 	node->decayMass(alpha);
@@ -136,7 +141,10 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 
 	// TODO: Get 3d coord of cells having high conflict mass
 	if(f_c > conflict_thres) {
+		point3d _p = keyToCoord(key);
+		conflict_cells_center.push_back(_p);
 		// Do something
+		std::cout<<"[INFO] Detect conflict cells at (" << _p.x() << ", " << _p.y() << ", " << _p.z() <<")\n";
 	} 
 
 	// Dempster normalization

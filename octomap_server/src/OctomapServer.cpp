@@ -53,6 +53,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFactor(0.8),
   m_latchedTopics(true),
   m_publishFreeSpace(false),
+  m_publishConfCells(false),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -158,6 +159,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFree.a = a;
 
   m_nh_private.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
+  m_nh_private.param("publish_conf_cells", m_publishConfCells, m_publishConfCells);
 
   m_nh_private.param("latch", m_latchedTopics, m_latchedTopics);
   if (m_latchedTopics){
@@ -171,6 +173,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_pointCloudPub = m_nh.advertise<sensor_msgs::PointCloud2>("octomap_point_cloud_centers", 1, m_latchedTopics);
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
+  m_cmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("conf_cells_vis_array", 1, m_latchedTopics);
 
   m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
   m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
@@ -493,6 +496,7 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   }
 
   bool publishFreeMarkerArray = m_publishFreeSpace && (m_latchedTopics || m_fmarkerPub.getNumSubscribers() > 0);
+  bool publishConfMarkerArray = m_publishConfCells && (m_latchedTopics || m_cmarkerPub.getNumSubscribers() > 0);
   bool publishMarkerArray = (m_latchedTopics || m_markerPub.getNumSubscribers() > 0);
   bool publishPointCloud = (m_latchedTopics || m_pointCloudPub.getNumSubscribers() > 0);
   bool publishBinaryMap = (m_latchedTopics || m_binaryMapPub.getNumSubscribers() > 0);
@@ -511,6 +515,11 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   visualization_msgs::MarkerArray occupiedNodesVis;
   // each array stores all cubes of a different size, one for each depth level:
   occupiedNodesVis.markers.resize(m_treeDepth+1);
+
+  // init markers:
+  visualization_msgs::MarkerArray confNodesVis;
+  // need only 1 array, all conf cells are leave nodes
+  confNodesVis.markers.resize(1);
 
   // init pointcloud:
   pcl::PointCloud<PCLPoint> pclCloud;
@@ -680,6 +689,49 @@ void OctomapServer::publishAll(const ros::Time& rostime){
 
     m_fmarkerPub.publish(freeNodesVis);
   }
+
+
+  // making ConfMarkerArray
+#ifndef COLOR_OCTOMAP_SERVER
+  if (publishConfMarkerArray){
+    // add cells center
+    std::vector<point3d> cells_center = m_octree->getConflictCells();
+    for (point3d c : cells_center){
+      geometry_msgs::Point p;
+      p.x = c.x();
+      p.y = c.y();
+      p.z = c.z();
+      confNodesVis.markers[0].points.push_back(p);
+    }
+    
+    // clear conflict cells for next pointcloud insertion
+    m_octree->clearConfictCells();
+
+    // finish ConfMarkerArray
+    std_msgs::ColorRGBA _color_conf;
+    _color_conf.r = 255.0;
+    _color_conf.g = 0.0;
+    _color_conf.b = 0.0;
+    _color_conf.a = 1.0;
+
+    confNodesVis.markers[0].header.frame_id = m_worldFrameId;
+    confNodesVis.markers[0].header.stamp = rostime;
+    confNodesVis.markers[0].ns = "map";
+    confNodesVis.markers[0].id = 0;
+    confNodesVis.markers[0].type = visualization_msgs::Marker::CUBE_LIST;
+    confNodesVis.markers[0].scale.x = m_res;
+    confNodesVis.markers[0].scale.y = m_res;
+    confNodesVis.markers[0].scale.z = m_res;
+    confNodesVis.markers[0].color = m_color;
+
+    if (confNodesVis.markers[0].points.size() > 0)
+      confNodesVis.markers[0].action = visualization_msgs::Marker::ADD;
+    else
+      confNodesVis.markers[0].action = visualization_msgs::Marker::DELETE;
+
+    m_cmarkerPub.publish(confNodesVis);
+  }
+#endif
 
 
   // finish pointcloud:

@@ -151,12 +151,16 @@ namespace octomap {
 		
 		void setIncomingTime(const ros::Time& _time) {incomingTime = _time;}
 
+		/// conflict_cells_center handle
+		std::vector<point3d>& getConflictCells() {return conflict_cells_center;} 
+		void clearConfictCells() {conflict_cells_center.clear();}
+
 	protected:
 		// Evidential Fusion constants
 		const float tau = 1.3f;  // time constant
 		const float lambda_occupied = 0.7f;
 		const float lambda_free = 0.7f;
-		const float conflict_thres = 0.25f;
+		const float conflict_thres = 0.5f;  // 0.35f
 		std::vector<point3d> conflict_cells_center;
 
 		// timestamp of incoming pointcloud. This is updated in callback function "insertCloudCallback"
@@ -172,7 +176,7 @@ namespace octomap {
     class StaticMemberInitializer{
 		public:
 			StaticMemberInitializer() {
-				EvidOcTree* tree = new EvidOcTree(0.1);
+				EvidOcTree* tree = new EvidOcTree(0.05); // 0.1
 				tree->clearKeyRays();
 				AbstractOcTree::registerTreeType(tree);
 			}
