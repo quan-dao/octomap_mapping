@@ -32,6 +32,7 @@
 
 #include <ros/ros.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <visualization_msgs/Marker.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <std_msgs/ColorRGBA.h>
 
@@ -125,6 +126,7 @@ protected:
   void publishBinaryOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   void publishFullOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
+  void publishConfCells(const ros::Time& rostime = ros::Time::now());
 
   /**
   * @brief update occupancy map with a scan labeled as ground and nonground.
@@ -225,6 +227,7 @@ protected:
   bool m_latchedTopics;
   bool m_publishFreeSpace;
   bool m_publishConfCells;
+  bool m_publishConfCellsOnly;
 
   double m_res;
   unsigned m_treeDepth;

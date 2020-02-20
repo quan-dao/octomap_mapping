@@ -151,8 +151,6 @@ namespace octomap {
 		
 		void setIncomingTime(const ros::Time& _time) {incomingTime = _time;}
 		
-		std::vector<point3d> conflict_cells_center;	
-
 		/// conflict_cells_center handle
 		std::vector<point3d>& getConflictCells() {return conflict_cells_center;} 
 		void clearConfictCells() {conflict_cells_center.clear();}
