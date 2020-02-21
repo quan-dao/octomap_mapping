@@ -144,7 +144,7 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 		point3d _p = keyToCoord(key);
 		conflict_cells_center.push_back(_p);
 		// Do something
-		std::cout<<"[INFO] Detect conflict cells at (" << _p.x() << ", " << _p.y() << ", " << _p.z() <<")\n";
+		// std::cout<<"[INFO] Detect conflict cells at (" << _p.x() << ", " << _p.y() << ", " << _p.z() <<")\n";
 	} 
 
 	// Dempster normalization

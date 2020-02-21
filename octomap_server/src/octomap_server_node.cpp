@@ -77,11 +77,17 @@ int main(int argc, char** argv){
     }
   }
 
-  try{
-    ros::spin();
-  }catch(std::runtime_error& e){
-    ROS_ERROR("octomap_server exception: %s", e.what());
-    return -1;
+  // try{
+  //   ros::spin();
+  // }catch(std::runtime_error& e){
+  //   ROS_ERROR("octomap_server exception: %s", e.what());
+  //   return -1;
+  // }
+  ros::Rate rate(10);
+  while (ros::ok())
+  {
+    rate.sleep();
+    ros::spinOnce();
   }
 
   return 0;

@@ -14,6 +14,9 @@ set(PACKAGE_DEPENDENCIES
   octomap_msgs
   dynamic_reconfigure
   nodelet
+  image_geometry
+  cv_bridge
+  image_transport
 )
 
 
