@@ -610,16 +610,26 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
   }
 
   // mark free cells only if not seen occupied in this cloud
+  int num_node = 0;
+  ros::WallTime tic = ros::WallTime::now();
   for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
     if (occupied_cells.find(*it) == occupied_cells.end()){
       m_octree->updateNode(*it, false);
+      num_node++;
     }
   }
+  double elapsed = (ros::WallTime::now()-tic).toSec();
+  std::cout<<"[INFO] Insert "<<num_node<<" free cells cost "<<elapsed<<"sec\t"<<elapsed/(double) num_node<<" sec/node\n";
 
   // now mark all occupied cells:
+  num_node = 0;
+  tic = ros::WallTime::now();
   for (KeySet::iterator it = occupied_cells.begin(), end=occupied_cells.end(); it!= end; it++) {
     m_octree->updateNode(*it, true);
+    num_node++;
   }
+  elapsed = (ros::WallTime::now()-tic).toSec();
+  std::cout<<"[INFO] Insert "<<num_node<<" occupied cells cost "<<elapsed<<"sec\t"<<elapsed/(double) num_node<<" sec/node\n";
 
   // TODO: eval lazy+updateInner vs. proper insertion
   // non-lazy by default (updateInnerOccupancy() too slow for large maps)

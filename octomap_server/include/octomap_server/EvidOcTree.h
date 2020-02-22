@@ -10,51 +10,65 @@
 
 #include <ros/ros.h>
 
+
+const float EPSILON = 1.0e-5;
+
 namespace octomap {
 
 	// ---------------------- Evidential Mass ---------------------------
 	class EvidMass {
 	public:
 		EvidMass() {
-			mass.push_back(0.0f);  // conflict
-			mass.push_back(0.0f);  // free
-			mass.push_back(0.0f);  // occupied
-			mass.push_back(1.0f);  // ignorance 
+			mass = new float[3];
+			mass[0] = 0.0f;  // free
+			mass[1] = 0.0f;  // occupied
+			mass[2] = 1.0f;  // ignorance 
 		}
 
-		EvidMass(float c, float f, float o, float i) {
-			mass.push_back(c);
-			mass.push_back(f);
-			mass.push_back(o);
-			mass.push_back(i);
+		EvidMass(float f, float o, float i) {
+			mass = new float[3];
+			mass[0] = f;  // free
+			mass[1] = o;  // occupied
+			mass[2] = i;  // ignorance
+		}
+
+		~EvidMass()
+		{
+			delete mass;
 		}
 
 		/// accessing functions
-		inline float c() const {return mass[0];}
-		inline float f() const {return mass[1];}
-		inline float o() const {return mass[2];}
-		inline float i() const {return mass[3];}
+		inline float c() const {
+			float c_ = 1.0f - (mass[0] + mass[1] + mass[2]);
+			if (c_<-EPSILON) // mass leaking because of clamping???
+				return 0.0f;
+			else
+				return c_;
+		}
+		inline float f() const {return mass[0];}
+		inline float o() const {return mass[1];}
+		inline float i() const {return mass[2];}
 		
 		// Check if evidential mass is valid
 		inline bool isValid() const {
-			float tot_mass(0.0);
-			bool re = true; 
-			for(float _m : mass) {
-				tot_mass += _m;
-				re = re && (_m >= 0.0f);
+			bool re = (mass[0]>=-EPSILON) && (mass[1]>=-EPSILON) && (mass[2]>=-EPSILON);
+			if (re)
+				return true;
+			else {
+				std::cout<<"[ERROR]Invalid mass ( "<<mass[0]<<", "<<mass[1]<<", "<<mass[2]<<" )\n";
+				return false;
 			}
-			return re && (tot_mass >= 0.95f) && (tot_mass <= 1.05f);
+
 		}
 
-		inline void setValue(float c, float f, float o, float i) {
-			mass[0] = c;
-			mass[1] = f;
-			mass[2] = o;
-			mass[3] = i;
+		inline void setValue(float f, float o, float i) {
+			mass[0] = f;
+			mass[1] = o;
+			mass[2] = i;
 		}
 
 	protected:
-		std::vector<float> mass;
+		float* mass;  // just store free, occupied & ignorance
 	}; 
 
 
@@ -67,7 +81,7 @@ namespace octomap {
 		friend class EvidOcTree;
 
 		EvidOcTreeNode() : updatedTime(0, 0) {
-			massPtr = new EvidMass();
+			massPtr = new EvidMass;
 		}
 
 		~EvidOcTreeNode() {
@@ -78,21 +92,18 @@ namespace octomap {
 			// copy data payload
 			OcTreeNode::copyData(from);
 			// copy mass
-			copyMass(from.getMassPtr());
+			copyMass(from.massPtr);
 			// copy updated time
 			updatedTime = from.updatedTime;
 		}
 		
 		/// Mass handler
-		inline EvidMass* getMassPtr() const {return massPtr;}
-
 		inline void copyMass(const EvidMass* srcMassPtr) {
-			massPtr->setValue(srcMassPtr->c(), srcMassPtr->f(), srcMassPtr->o(), srcMassPtr->i());
+			massPtr->setValue(srcMassPtr->f(), srcMassPtr->o(), srcMassPtr->i());
 		}
 
 		inline void decayMass(float alp) {
-			massPtr->setValue(massPtr->c() * alp,
-												massPtr->f() * alp,
+			massPtr->setValue(massPtr->f() * alp,
 												massPtr->o() * alp,
 												massPtr->i() * alp + 1.0f - alp);
 		}
@@ -113,8 +124,8 @@ namespace octomap {
 		 */
 		void updateOccupancyChildren();
 
-	protected:
 		EvidMass* massPtr;
+	protected:
 		ros::Time updatedTime;
 	};
 	 
@@ -149,11 +160,11 @@ namespace octomap {
 		 */
 		void upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicBeliefAssign, const OcTreeKey& key);
 		
-		void setIncomingTime(const ros::Time& _time) {incomingTime = _time;}
+		inline void setIncomingTime(const ros::Time& _time) {incomingTime = _time;}
 		
 		/// conflict_cells_center handle
-		std::vector<point3d>& getConflictCells() {return conflict_cells_center;} 
-		void clearConfictCells() {conflict_cells_center.clear();}
+		inline std::vector<point3d>& getConflictCells() {return conflict_cells_center;} 
+		inline void clearConfictCells() {conflict_cells_center.clear();}
 
 	protected:
 		// Evidential Fusion constants
@@ -162,6 +173,7 @@ namespace octomap {
 		const float lambda_free = 0.7f;
 		const float conflict_thres = 0.5f;  // 0.35f
 		std::vector<point3d> conflict_cells_center;
+		EvidMass basic_belief_occupied, basic_belief_free;
 
 		// timestamp of incoming pointcloud. This is updated in callback function "insertCloudCallback"
 		ros::Time incomingTime;  

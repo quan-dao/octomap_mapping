@@ -6,30 +6,28 @@ namespace octomap {
 // ------------------------ Node impl ------------------------
 void EvidOcTreeNode::updateOccupancyChildren() {
 	// Compute children's average mass
-	float c_(0.0f), f_(0.0f), o_(0.0f), i_(0.0f);
+	float f_(0.0f), o_(0.0f), i_(0.0f);
 	int num_child(0);
 	
 	if(children != NULL) {
 		for(int i=0; i<8; i++) {
 			EvidOcTreeNode* child = static_cast<EvidOcTreeNode*>(children[i]);
 			if(child != NULL) {
-				c_ += child->getMassPtr()->c();
-				f_ += child->getMassPtr()->f();
-				o_ += child->getMassPtr()->o();
-				i_ += child->getMassPtr()->i();
+				f_ += child->massPtr->f();
+				o_ += child->massPtr->o();
+				i_ += child->massPtr->i();
 			}
 		}
 	}
 
 	if(num_child > 0) {
-		c_ /= (float) num_child;
 		f_ /= (float) num_child;
 		o_ /= (float) num_child;
 		i_ /= (float) num_child;
 	}
 
 	// set node's evid mass
-	massPtr->setValue(c_, f_, o_, i_);
+	massPtr->setValue(f_, o_, i_);
 
 	// convert evid mass to log odds
 	setLogOdds(evidMassToLogOdds());
@@ -40,23 +38,24 @@ void EvidOcTreeNode::updateOccupancyChildren() {
 // ------------------------ Tree impl ------------------------
 EvidOcTree::StaticMemberInitializer EvidOcTree::evidOcTreeMemberInit;
 
-EvidOcTree::EvidOcTree(double in_resolution)
-	: OccupancyOcTreeBase<EvidOcTreeNode>(in_resolution) {
+EvidOcTree::EvidOcTree(double in_resolution) :
+	OccupancyOcTreeBase<EvidOcTreeNode>(in_resolution),
+	basic_belief_occupied(0.0f, lambda_occupied, 1.0f-lambda_occupied),
+	basic_belief_free(lambda_free, 0.0f, 1.0f-lambda_free)
+	{
 		evidOcTreeMemberInit.ensureLinking();
 	};
 
 
 EvidOcTreeNode* EvidOcTree::updateNode(const OcTreeKey& key, bool occupied, bool lazy_eval) {
-	// Create Basic Belief Assignment
-	EvidMass basicBeliefAssign(0.0f, 0.0f, 0.0f, 0.0f);
 	if(occupied) {
-		basicBeliefAssign.setValue(0.0f, 0.0f, lambda_occupied, 1.0f-lambda_occupied);
+		return updateNode(key, basic_belief_occupied, lazy_eval);
 	} else {
-		basicBeliefAssign.setValue(0.0f, lambda_free, 0.0f, 1.0f-lambda_free);
+		return updateNode(key, basic_belief_free, lazy_eval);
 	}
 	
 	// Rewire the flow of node update
-	return updateNode(key, basicBeliefAssign, lazy_eval);
+	// return updateNode(key, basicBeliefAssign, lazy_eval);
 }
 
 
@@ -121,7 +120,7 @@ EvidOcTreeNode* EvidOcTree::updateNodeRecurs(EvidOcTreeNode* node, bool node_jus
 void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicBeliefAssign, const OcTreeKey& key) {
 	/// Compute decay factor (alpha)
 	// time from last update of this node to the arrival of current pointcloud
-	double time_elapsed = (incomingTime - node->updatedTime).toSec();
+	double time_elapsed = (incomingTime - node->getUpdatedTime()).toSec();
 	assert(time_elapsed >= 0.0);
 	// update node's updatedTime
 	node->setUpdatedTime(incomingTime);
@@ -134,10 +133,10 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 	node->decayMass(alpha);
 
 	// Conjunctive fusion (f_ means fused)
-	float f_c = node->getMassPtr()->f() * basicBeliefAssign.o() + node->getMassPtr()->o() * basicBeliefAssign.f();
-	float f_f = node->getMassPtr()->f() * basicBeliefAssign.f() + node->getMassPtr()->f() * basicBeliefAssign.i() + node->getMassPtr()->i() * basicBeliefAssign.f();
-	float f_o = node->getMassPtr()->o() * basicBeliefAssign.o() + node->getMassPtr()->o() * basicBeliefAssign.i() + node->getMassPtr()->i() * basicBeliefAssign.o();
-	float f_i = node->getMassPtr()->i() * basicBeliefAssign.i();
+	float f_c = node->massPtr->f() * basicBeliefAssign.o() + node->massPtr->o() * basicBeliefAssign.f();
+	float f_f = node->massPtr->f() * basicBeliefAssign.f() + node->massPtr->f() * basicBeliefAssign.i() + node->massPtr->i() * basicBeliefAssign.f();
+	float f_o = node->massPtr->o() * basicBeliefAssign.o() + node->massPtr->o() * basicBeliefAssign.i() + node->massPtr->i() * basicBeliefAssign.o();
+	float f_i = node->massPtr->i() * basicBeliefAssign.i();
 
 	// TODO: Get 3d coord of cells having high conflict mass
 	if(f_c > conflict_thres) {
@@ -149,8 +148,9 @@ void EvidOcTree::upadteNodeEvidMass(EvidOcTreeNode* node, const EvidMass& basicB
 
 	// Dempster normalization
 	float k = 1.0f / (1.0f - f_c);
-	node->getMassPtr()->setValue(0.0f, k*f_f, k*f_o, k*f_i);
-	assert(node->getMassPtr()->isValid());
+	node->massPtr->setValue(k*f_f, k*f_o, k*f_i);
+	assert(node->massPtr->isValid());
+
 	// update node's logodds according to its evidential mass
 	node->setLogOdds(node->evidMassToLogOdds());
 
