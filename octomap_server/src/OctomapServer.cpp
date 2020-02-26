@@ -66,6 +66,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_pointcloudMaxZ(std::numeric_limits<double>::max()),
   m_occupancyMinZ(-std::numeric_limits<double>::max()),
   m_occupancyMaxZ(std::numeric_limits<double>::max()),
+  m_pointcloudLeafSize(0.01),
   m_minSizeX(0.0), m_minSizeY(0.0),
   m_filterSpeckles(false), m_filterGroundPlane(false),
   m_groundFilterDistance(0.04), m_groundFilterAngle(0.15), m_groundFilterPlaneDistance(0.07),
@@ -91,6 +92,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("occupancy_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
   m_nh_private.param("min_x_size", m_minSizeX,m_minSizeX);
   m_nh_private.param("min_y_size", m_minSizeY,m_minSizeY);
+  m_nh_private.param("pointcloud_leaf_size", m_pointcloudLeafSize,m_pointcloudLeafSize);
 
   m_nh_private.param("filter_speckles", m_filterSpeckles, m_filterSpeckles);
   m_nh_private.param("filter_ground", m_filterGroundPlane, m_filterGroundPlane);
@@ -184,9 +186,15 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 #else
   m_imageSub = new message_filters::Subscriber<sensor_msgs::Image> (m_nh, "image_in", 5);
   m_camInfoSub = new message_filters::Subscriber<sensor_msgs::CameraInfo> (m_nh, "cam_info", 5);
-  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(5), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub);
-  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallbackSync, this, _1, _2, _3));
+  m_bboxSub = new message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> (m_nh, "bounding_boxes", 5);
+  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(5), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub, *m_bboxSub);
+  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallbackSync, this, _1, _2, _3, _4));
   m_image_pub = m_it.advertise("drawed_image", 5);
+  // declare class of objects of interest
+  m_classes.push_back("person");
+  m_classes.push_back("car");
+  m_classes.push_back("bus");
+  m_classes.push_back("truck");
 #endif
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
@@ -279,11 +287,11 @@ bool OctomapServer::openFile(const std::string& filename){
 
 }
 
-void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg)
+void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg)
 {
   /// timestamp different
   std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
-  std::cout<<"[INFO] Timestamp diff: image vs info "<<(image_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
+  std::cout<<"[INFO] Timestamp diff: Bbox vs info "<<(bbox_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
 
   ros::WallTime tic = ros::WallTime::now();
   // update inComingTime of the octree
@@ -333,6 +341,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     }catch(tf::TransformException& ex){
       ROS_ERROR_STREAM( "Transform error for ground plane filter: " << ex.what() << ", quitting callback.\n"
                         "You need to set the base_frame_id or disable filter_ground.");
+      return;
     }
 
 
@@ -348,6 +357,14 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     pass_y.filter(pc);
     pass_z.setInputCloud(pc.makeShared());
     pass_z.filter(pc);
+
+    // downsample PC with voxel grid filter
+    pcl::VoxelGrid<PCLPoint> voxGrid;
+    voxGrid.setInputCloud(pc.makeShared());
+    voxGrid.setLeafSize(m_pointcloudLeafSize, m_pointcloudLeafSize, m_pointcloudLeafSize);
+    voxGrid.filter(pc);
+
+
     filterGroundPlane(pc, pc_ground, pc_nonground);
 
     // transform clouds to world frame for insertion
@@ -370,13 +387,28 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     pc_ground.header = pc.header;
     pc_nonground.header = pc.header;
   }
-
+  std::cout<<"[INFO] Process pointcloud takes "<<(ros::WallTime::now() - tic).toSec()<<" sec\n";
 
   insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground);
   std::cout<<"[INFO] insert scan takes "<<(ros::WallTime::now() - tic).toSec()<<" sec\n";  
 #ifndef COLOR_OCTOMAP_SERVER
   std::cout<<"[INFO] Detect "<<m_octree->getConflictCells().size()<<" conflict cells\n";
 #endif
+
+#ifndef COLOR_OCTOMAP_SERVER
+  //
+  // get bboxes & filter out irrelevant bboxes
+  //
+  m_bboxes_idx.clear();  // clear out old result to prepare for new 
+  for (unsigned int i=0; i<bbox_msg->bounding_boxes.size(); ++i) {
+    // check if the current box's class is of interest
+    std::vector<std::string>::iterator it = std::find(m_classes.begin(), m_classes.end(), bbox_msg->bounding_boxes[i].Class);
+    if (it != m_classes.end())
+      m_bboxes_idx.push_back(i);
+  }
+  std::cout<<"[INFO] Found "<<m_bboxes_idx.size()<<" boxes of inerests\n";
+#endif
+
   //
   // draw conflict cells
   //
@@ -398,12 +430,16 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     ROS_ERROR("Fail to find worldToCam transform due %s\nExiting callback", ex.what());
   }
 #ifndef COLOR_OCTOMAP_SERVER
-  if (!m_octree->getConflictCells().empty()) {
+  if (!m_octree->getConflictCells().empty()) 
+  {
     // get camera model
     sensor_msgs::CameraInfo fix_info = *info_msg;
     fix_info.P[11] = 0;
     camera_model.fromCameraInfo(fix_info);
     
+    // prepare vector of bboxes having conflict cells
+    m_bboxes_conf.clear();
+
     for (point3d p_ :  m_octree->getConflictCells()) {
       // get conf cell world coordinate
       tf::Vector3 wp;
@@ -419,9 +455,29 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
         cv::Point3d cp_cv((double) cp.getX(), (double) cp.getY(), (double) cp.getZ());
         cv::Point2d uv;
         uv = camera_model.project3dToPixel(cp_cv);
-        // draw
-        cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
+        // check if this cell is in any bbox
+        for (int id_ : m_bboxes_idx) {
+          if ((uv.x > bbox_msg->bounding_boxes[id_].xmin) && (uv.x < bbox_msg->bounding_boxes[id_].xmax) && (uv.y > bbox_msg->bounding_boxes[id_].ymin) && (uv.y < bbox_msg->bounding_boxes[id_].ymax)) 
+          {
+            // draw
+            cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
+            // std::cout<<"[INFO] Found "<<m_bboxes_idx.size()<<" boxes of inerests\n";
+            // check if id_ is already stored in m_bboxes_conf
+            std::vector<int>::iterator it_ = std::find(m_bboxes_conf.begin(), m_bboxes_conf.end(), id_);
+            if (it_ == m_bboxes_conf.end())
+              m_bboxes_conf.push_back(id_);
+
+            break;
+          }
+        }
       }
+    }
+
+    // TODO: draw boudning box
+    std::cout<<"[INFO] Drawing "<<m_bboxes_conf.size()<<" bounding boxes\n";
+    for (int id_ : m_bboxes_conf) {
+      cv::rectangle(image, cv::Point(bbox_msg->bounding_boxes[id_].xmin, bbox_msg->bounding_boxes[id_].ymin), 
+      cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 2);
     }
   }
 #endif
@@ -532,6 +588,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
 }
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
+  ros::WallTime tic = ros::WallTime::now();
   point3d sensorOrigin = pointTfToOctomap(sensorOriginTf);
 
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin)
@@ -608,10 +665,11 @@ void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCl
       }
     }
   }
+  std::cout<<"[INFO] @insetScan ray casting cost "<<(ros::WallTime::now()-tic).toSec()<<" sec\n";
 
   // mark free cells only if not seen occupied in this cloud
   int num_node = 0;
-  ros::WallTime tic = ros::WallTime::now();
+  tic = ros::WallTime::now();
   for(KeySet::iterator it = free_cells.begin(), end=free_cells.end(); it!= end; ++it){
     if (occupied_cells.find(*it) == occupied_cells.end()){
       m_octree->updateNode(*it, false);

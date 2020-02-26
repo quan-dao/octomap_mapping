@@ -57,6 +57,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 
@@ -74,6 +75,8 @@
 #include <octomap/OcTreeKey.h>
 #include <octomap_server/EvidOcTree.h>
 
+#include <darknet_ros_msgs/BoundingBoxes.h>
+#include <algorithm>
 #include <iostream>
 
 //#define COLOR_OCTOMAP_SERVER // switch color here - easier maintenance, only maintain OctomapServer. Two targets are defined in the cmake, octomap_server_color and octomap_server. One has this defined, and the other doesn't
@@ -106,7 +109,7 @@ public:
   bool resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
-  virtual void insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg);
+  virtual void insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg);
   virtual bool openFile(const std::string& filename);
 
 protected:
@@ -218,7 +221,8 @@ protected:
   tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
   message_filters::Subscriber<sensor_msgs::Image>* m_imageSub;
   message_filters::Subscriber<sensor_msgs::CameraInfo>* m_camInfoSub;
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
+  message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes>* m_bboxSub;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::Image, sensor_msgs::CameraInfo, darknet_ros_msgs::BoundingBoxes> MySyncPolicy;
   message_filters::Synchronizer<MySyncPolicy>* sync;
   image_geometry::PinholeCameraModel camera_model;
   image_transport::ImageTransport m_it;
@@ -258,6 +262,7 @@ protected:
   double m_pointcloudMaxY;
   double m_pointcloudMinZ;
   double m_pointcloudMaxZ;
+  float m_pointcloudLeafSize;
   double m_occupancyMinZ;
   double m_occupancyMaxZ;
   double m_minSizeX;
@@ -282,6 +287,12 @@ protected:
   unsigned m_multires2DScale;
   bool m_projectCompleteMap;
   bool m_useColoredMap;
+
+  // bbox stuff
+  std::vector<std::string> m_classes;
+  std::vector<int> m_bboxes_idx;
+  std::vector<int> m_bboxes_conf;  // store idx of bbox has conflict cells
+
 };
 }
 

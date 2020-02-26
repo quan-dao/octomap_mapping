@@ -25,7 +25,7 @@ namespace octomap {
 			mass[2] = 1.0f;  // ignorance 
 		}
 
-		EvidMass(float f, float o, float i) {
+		EvidMass(const float& f, const float& o, const float& i) {
 			mass = new float[3];
 			mass[0] = f;  // free
 			mass[1] = o;  // occupied
@@ -61,7 +61,7 @@ namespace octomap {
 
 		}
 
-		inline void setValue(float f, float o, float i) {
+		inline void setValue(const float& f, const float& o, const float& i) {
 			mass[0] = f;
 			mass[1] = o;
 			mass[2] = i;
@@ -102,7 +102,7 @@ namespace octomap {
 			massPtr->setValue(srcMassPtr->f(), srcMassPtr->o(), srcMassPtr->i());
 		}
 
-		inline void decayMass(float alp) {
+		inline void decayMass(const float& alp) {
 			massPtr->setValue(massPtr->f() * alp,
 												massPtr->o() * alp,
 												massPtr->i() * alp + 1.0f - alp);
@@ -170,8 +170,8 @@ namespace octomap {
 		// Evidential Fusion constants
 		const float tau = 1.3f;  // time constant
 		const float lambda_occupied = 0.7f;
-		const float lambda_free = 0.7f;
-		const float conflict_thres = 0.5f;  // 0.35f
+		const float lambda_free = 0.4f;
+		const float conflict_thres = 0.35f;  // 0.35f
 		std::vector<point3d> conflict_cells_center;
 		EvidMass basic_belief_occupied, basic_belief_free;
 
