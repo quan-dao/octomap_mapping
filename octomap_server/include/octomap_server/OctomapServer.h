@@ -293,6 +293,11 @@ protected:
   std::vector<int> m_bboxes_idx;
   std::vector<int> m_bboxes_conf;  // store idx of bbox has conflict cells
 
+  // evid octree stuff
+  float m_evid_lambdaOccupied;
+  float m_evid_lambdaFree;
+  float m_evid_conflictThres;
+
 };
 }
 

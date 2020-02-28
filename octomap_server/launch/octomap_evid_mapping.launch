@@ -1,7 +1,10 @@
 <launch>
 	<param name="/use_sim_time" value="true"/>
+	<!--RViz-->
+	<node type="rviz" name="rviz" pkg="rviz" args="-d octomap_conf.rviz" />
+
 	<!--Launch rosbag-->
-	<node pkg="rosbag" type="play" name="player" args="-r 0.05 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0005_synced.bag">
+	<node pkg="rosbag" type="play" name="player" args="-r 0.07 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0051_synced.bag">
 	</node>
 
 	<!--Yolo-->
@@ -14,8 +17,8 @@
 		<!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
 		<param name="frame_id" type="string" value="world" />
 		
-		<!-- maximum range to integrate (speedup!) -->
-		<param name="sensor_model/max_range" value="30.0" />
+		<!-- maximum range to integrate (speedup!) past (good): 30.0-->
+		<param name="sensor_model/max_range" value="50.0" />
 
 		<!-- to prepare topic as needed -->
 		<param name="latch" value="false" />
@@ -25,8 +28,6 @@
 		<param name="ground_filter/distance" value="0.15" />
 		<param name="ground_filter/angle" value="0.2" />
 		<param name="ground_filter/plane_distance" value="0.1" />
-
-
 		<param name="base_frame_id" value="base_link"/>
 
 		<!-- data source to integrate (PointCloud2) -->
@@ -38,14 +39,19 @@
 		<param name="pointcloud_min_z" value="0.0" />
 		<param name="pointcloud_max_z" value="4.5" />
 		<param name="pointcloud_leaf_size" value="0.09" />
+
 		<!--to visualize conflict cells-->
 		<param name="publish_conf_cells" value="true" />
 
 		<!--image vis-->
-		<remap from="image_in" to="/kitti/camera_color_left/image_raw" />
-		<remap from="cam_info" to="/kitti/camera_color_left/camera_info" />
-
+		<remap from="image_in" to="/kitti/camera_color/left/image_rect_color" />
+		<remap from="cam_info" to="/kitti/camera_color/left/camera_info" />
 		<param name="compress_map" value="false" />
+
+		<!--Evidential Grid stuff-->
+		<param name="evidTree/lambda_occupied" value="0.75" />
+		<param name="evidTree/lambda_free" value="0.4" />
+		<param name="evidTree/conflict_threshold" value="0.25" /> <!--past (good): 0.45-->
 
 		<!--Darknet stuff-->
 		<remap from="bounding_boxes" to="/darknet_ros/bounding_boxes_adapted" />

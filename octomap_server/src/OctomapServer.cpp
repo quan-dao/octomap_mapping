@@ -72,7 +72,10 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_groundFilterDistance(0.04), m_groundFilterAngle(0.15), m_groundFilterPlaneDistance(0.07),
   m_compressMap(true),
   m_incrementalUpdate(false),
-  m_initConfig(true)
+  m_initConfig(true),
+  m_evid_lambdaOccupied(0.7f),
+  m_evid_lambdaFree(0.4f),
+  m_evid_conflictThres(0.35f)
 {
   double probHit, probMiss, thresMin, thresMax;
 
@@ -112,6 +115,10 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("sensor_model/max", thresMax, 0.97);
   m_nh_private.param("compress_map", m_compressMap, m_compressMap);
   m_nh_private.param("incremental_2D_projection", m_incrementalUpdate, m_incrementalUpdate);
+  /// evidential grid parameter
+  m_nh_private.param("evidTree/lambda_occupied", m_evid_lambdaOccupied, m_evid_lambdaOccupied);
+  m_nh_private.param("evidTree/lambda_free", m_evid_lambdaFree, m_evid_lambdaFree);
+  m_nh_private.param("evidTree/conflict_threshold", m_evid_conflictThres, m_evid_conflictThres);
 
   if (m_filterGroundPlane && (m_pointcloudMinZ > 0.0 || m_pointcloudMaxZ < 0.0)){
     ROS_WARN_STREAM("You enabled ground filtering but incoming pointclouds will be pre-filtered in ["
@@ -133,7 +140,11 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   }
 
   // initialize octomap object & params
+#ifdef COLOR_OCTOMAP_SERVER
   m_octree = new OcTreeT(m_res);
+#else
+  m_octree = new OcTreeT(m_res, m_evid_lambdaOccupied, m_evid_lambdaFree, m_evid_conflictThres);
+#endif
   m_octree->setProbHit(probHit);
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
@@ -187,7 +198,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_imageSub = new message_filters::Subscriber<sensor_msgs::Image> (m_nh, "image_in", 5);
   m_camInfoSub = new message_filters::Subscriber<sensor_msgs::CameraInfo> (m_nh, "cam_info", 5);
   m_bboxSub = new message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> (m_nh, "bounding_boxes", 5);
-  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(5), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub, *m_bboxSub);
+  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(15), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub, *m_bboxSub);
   sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallbackSync, this, _1, _2, _3, _4));
   m_image_pub = m_it.advertise("drawed_image", 5);
   // declare class of objects of interest
@@ -477,7 +488,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     std::cout<<"[INFO] Drawing "<<m_bboxes_conf.size()<<" bounding boxes\n";
     for (int id_ : m_bboxes_conf) {
       cv::rectangle(image, cv::Point(bbox_msg->bounding_boxes[id_].xmin, bbox_msg->bounding_boxes[id_].ymin), 
-      cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 2);
+      cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 3);
     }
   }
 #endif

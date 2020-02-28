@@ -38,8 +38,23 @@ void EvidOcTreeNode::updateOccupancyChildren() {
 // ------------------------ Tree impl ------------------------
 EvidOcTree::StaticMemberInitializer EvidOcTree::evidOcTreeMemberInit;
 
+EvidOcTree::EvidOcTree(double in_resolution, float lambda_occ, float lambda_free, float conf_thres) :
+	OccupancyOcTreeBase<EvidOcTreeNode>(in_resolution),
+	lambda_occupied(lambda_occ),
+	lambda_free(lambda_free),
+	conflict_thres(conf_thres),
+	basic_belief_occupied(0.0f, lambda_occupied, 1.0f-lambda_occupied),
+	basic_belief_free(lambda_free, 0.0f, 1.0f-lambda_free)
+	{
+		evidOcTreeMemberInit.ensureLinking();
+	};
+
+
 EvidOcTree::EvidOcTree(double in_resolution) :
 	OccupancyOcTreeBase<EvidOcTreeNode>(in_resolution),
+	lambda_occupied(0.7f),
+	lambda_free(0.4f),
+	conflict_thres(0.35f),
 	basic_belief_occupied(0.0f, lambda_occupied, 1.0f-lambda_occupied),
 	basic_belief_free(lambda_free, 0.0f, 1.0f-lambda_free)
 	{
