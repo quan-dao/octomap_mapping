@@ -76,8 +76,10 @@
 #include <octomap_server/EvidOcTree.h>
 
 #include <darknet_ros_msgs/BoundingBoxes.h>
+#include <kitti_msgs/TrackletsStamped.h>
 #include <algorithm>
 #include <iostream>
+#include <cmath>
 
 //#define COLOR_OCTOMAP_SERVER // switch color here - easier maintenance, only maintain OctomapServer. Two targets are defined in the cmake, octomap_server_color and octomap_server. One has this defined, and the other doesn't
 
@@ -109,7 +111,7 @@ public:
   bool resetSrv(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud);
-  virtual void insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg);
+  virtual void insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg, const kitti_msgs::TrackletsStamped::ConstPtr& tracklets_msg);
   virtual bool openFile(const std::string& filename);
 
 protected:
@@ -222,7 +224,8 @@ protected:
   message_filters::Subscriber<sensor_msgs::Image>* m_imageSub;
   message_filters::Subscriber<sensor_msgs::CameraInfo>* m_camInfoSub;
   message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes>* m_bboxSub;
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::Image, sensor_msgs::CameraInfo, darknet_ros_msgs::BoundingBoxes> MySyncPolicy;
+  message_filters::Subscriber<kitti_msgs::TrackletsStamped>* m_trackletsSub;
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, sensor_msgs::Image, sensor_msgs::CameraInfo, darknet_ros_msgs::BoundingBoxes, kitti_msgs::TrackletsStamped> MySyncPolicy;
   message_filters::Synchronizer<MySyncPolicy>* sync;
   image_geometry::PinholeCameraModel camera_model;
   image_transport::ImageTransport m_it;

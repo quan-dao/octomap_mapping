@@ -198,8 +198,9 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_imageSub = new message_filters::Subscriber<sensor_msgs::Image> (m_nh, "image_in", 5);
   m_camInfoSub = new message_filters::Subscriber<sensor_msgs::CameraInfo> (m_nh, "cam_info", 5);
   m_bboxSub = new message_filters::Subscriber<darknet_ros_msgs::BoundingBoxes> (m_nh, "bounding_boxes", 5);
-  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(15), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub, *m_bboxSub);
-  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallbackSync, this, _1, _2, _3, _4));
+  m_trackletsSub = new message_filters::Subscriber<kitti_msgs::TrackletsStamped> (m_nh, "tracklets_topic", 5);
+  sync = new message_filters::Synchronizer<MySyncPolicy> (MySyncPolicy(15), *m_tfPointCloudSub, *m_imageSub, *m_camInfoSub, *m_bboxSub, *m_trackletsSub);
+  sync->registerCallback(boost::bind(&OctomapServer::insertCloudCallbackSync, this, _1, _2, _3, _4, _5));
   m_image_pub = m_it.advertise("drawed_image", 5);
   // declare class of objects of interest
   m_classes.push_back("person");
@@ -242,6 +243,18 @@ OctomapServer::~OctomapServer(){
     delete m_octree;
     m_octree = NULL;
   }
+
+  if (m_trackletsSub){
+    delete m_trackletsSub;
+    m_trackletsSub = NULL;
+  }
+
+#ifndef COLOR_OCTOMAP_SERVER
+  if (sync) {
+    delete sync;
+    sync = NULL;
+  }
+#endif
 
 }
 
@@ -298,11 +311,12 @@ bool OctomapServer::openFile(const std::string& filename){
 
 }
 
-void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg)
+void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, const darknet_ros_msgs::BoundingBoxes::ConstPtr& bbox_msg, const kitti_msgs::TrackletsStamped::ConstPtr& tracklets_msg)
 {
   /// timestamp different
   std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
   std::cout<<"[INFO] Timestamp diff: Bbox vs info "<<(bbox_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
+  std::cout<<"[INFO] Timestamp diff: Tracklets vs info "<<(tracklets_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
 
   ros::WallTime tic = ros::WallTime::now();
   // update inComingTime of the octree
@@ -441,13 +455,13 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     ROS_ERROR("Fail to find worldToCam transform due %s\nExiting callback", ex.what());
   }
 #ifndef COLOR_OCTOMAP_SERVER
+  // get camera model
+  sensor_msgs::CameraInfo fix_info = *info_msg;
+  fix_info.P[11] = 0;
+  camera_model.fromCameraInfo(fix_info);
+  
   if (!m_octree->getConflictCells().empty()) 
-  {
-    // get camera model
-    sensor_msgs::CameraInfo fix_info = *info_msg;
-    fix_info.P[11] = 0;
-    camera_model.fromCameraInfo(fix_info);
-    
+  { 
     // prepare vector of bboxes having conflict cells
     m_bboxes_conf.clear();
 
@@ -471,7 +485,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
           if ((uv.x > bbox_msg->bounding_boxes[id_].xmin) && (uv.x < bbox_msg->bounding_boxes[id_].xmax) && (uv.y > bbox_msg->bounding_boxes[id_].ymin) && (uv.y < bbox_msg->bounding_boxes[id_].ymax)) 
           {
             // draw
-            cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
+            // cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
             // std::cout<<"[INFO] Found "<<m_bboxes_idx.size()<<" boxes of inerests\n";
             // check if id_ is already stored in m_bboxes_conf
             std::vector<int>::iterator it_ = std::find(m_bboxes_conf.begin(), m_bboxes_conf.end(), id_);
@@ -491,6 +505,74 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
       cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 3);
     }
   }
+  //
+  // Draw tracklets
+  //
+  // get transformation from veloToCam
+  if (!tracklets_msg->info.empty()) 
+  {
+    tf::StampedTransform veloToCamTf;
+    try {
+      m_tfListener.waitForTransform("camera_color_left", "velo_link", tracklets_msg->header.stamp, ros::Duration(0.1));
+      m_tfListener.lookupTransform("camera_color_left", "velo_link", tracklets_msg->header.stamp, veloToCamTf);
+    } catch (tf::TransformException& ex) {
+      ROS_ERROR("Fail to find veloToCam transform due to &s \nExiting callback", ex.what());
+      return;
+    }
+    // iterate all tracklets & project them on image plane
+    std::vector<tf::Vector3> vertices;  // init 3D bbox vertices of each tracklet - TODO: clear this afterward
+    int num_bbox = 0;
+    for (kitti_msgs::TrackletInfo tracklet_ : tracklets_msg->info) {
+      // vertices is in tracklet local frame -> need to transform to velodyne frame
+      vertices.push_back(tf::Vector3(tracklet_.l/2.0f, tracklet_.w/2.0f, 0.0f));
+      vertices.push_back(tf::Vector3(tracklet_.l/2.0f, -tracklet_.w/2.0f, 0.0f));
+      vertices.push_back(tf::Vector3(-tracklet_.l/2.0f, -tracklet_.w/2.0f, 0.0f));
+      vertices.push_back(tf::Vector3(-tracklet_.l/2.0f, tracklet_.w/2.0f, 0.0f));
+      vertices.push_back(tf::Vector3(tracklet_.l/2.0f, tracklet_.w/2.0f, tracklet_.h));
+      vertices.push_back(tf::Vector3(tracklet_.l/2.0f, -tracklet_.w/2.0f, tracklet_.h));
+      vertices.push_back(tf::Vector3(-tracklet_.l/2.0f, -tracklet_.w/2.0f, tracklet_.h));
+      vertices.push_back(tf::Vector3(-tracklet_.l/2.0f, tracklet_.w/2.0f, tracklet_.h));
+      // build transform from tracklet frame to velo
+      tf::Matrix3x3 ori_(cos(tracklet_.rz),   -sin(tracklet_.rz),   0.0,
+                        sin(tracklet_.rz),   cos(tracklet_.rz),    0.0,
+                        0.0,                 0.0,                  1.0);
+      tf::Vector3 posi_(tracklet_.tx, tracklet_.ty, tracklet_.tz);
+      tf::Transform trackletToVeloTf(ori_, posi_);
+      // iterate all vertices, transform to camera frame & project onto image plane
+      int bbox_xmin = image.cols, bbox_xmax = 0;
+      int bbox_ymin = image.rows, bbox_ymax = 0;
+      for (tf::Vector3 vertex : vertices) {
+        // transform to camera frame
+        tf::Vector3 c_vertex = veloToCamTf * trackletToVeloTf * vertex;
+        if (c_vertex.getZ() > 0.0) {
+          // project onto image
+          cv::Point3d c_vertexCV((double) c_vertex.getX(), (double) c_vertex.getY(), (double) c_vertex.getZ());
+          cv::Point2d uv;
+          uv = camera_model.project3dToPixel(c_vertexCV);
+          // update value of bbox min max
+          if (uv.x < bbox_xmin)
+            bbox_xmin = (int) uv.x;
+          if (uv.x > bbox_xmax)
+            bbox_xmax = (int) uv.x;
+          if (uv.y < bbox_ymin)
+            bbox_ymin = (int) uv.y;
+          if (uv.y > bbox_ymax)
+            bbox_ymax = (int) uv.y;  
+          }
+      }
+      // check if bbox is valid
+      if ((bbox_xmin < bbox_xmax) && (bbox_ymin < bbox_ymax)) {
+        num_bbox++;
+        cv::rectangle(image, cv::Point(bbox_xmin, bbox_ymin), cv::Point(bbox_xmax, bbox_ymax), CV_RGB(255, 0, 0), 3);
+      }
+
+      vertices.clear();
+    }
+    std::cout<<"[INFO] Drawed "<<num_bbox<<" 2D bboxes/"<<tracklets_msg->info.size()<<" tracklets\n";
+  } else {
+    std::cout<<"[INFO] There are no tracklets\n";
+  }
+
 #endif
   m_image_pub.publish(input_bridge->toImageMsg());
 

@@ -18,6 +18,7 @@ set(PACKAGE_DEPENDENCIES
   cv_bridge
   image_transport
   darknet_ros_msgs
+  kitti_msgs
 )
 
 

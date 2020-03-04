@@ -4,7 +4,7 @@
 	<node type="rviz" name="rviz" pkg="rviz" args="-d octomap_conf.rviz" />
 
 	<!--Launch rosbag-->
-	<node pkg="rosbag" type="play" name="player" args="-r 0.07 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0051_synced.bag">
+	<node pkg="rosbag" type="play" name="player" args="-r 0.03 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0005_synced.bag"> <!--past speed 0.07 (good)-->
 	</node>
 
 	<!--Yolo-->
@@ -44,8 +44,9 @@
 		<param name="publish_conf_cells" value="true" />
 
 		<!--image vis-->
-		<remap from="image_in" to="/kitti/camera_color/left/image_rect_color" />
-		<remap from="cam_info" to="/kitti/camera_color/left/camera_info" />
+		<remap from="image_in" to="/kitti/camera_color_left/image_raw" />
+		<remap from="cam_info" to="/kitti/camera_color_left/camera_info" />
+		<remap from="tracklets_topic" to="/kitti/tracklets" />
 		<param name="compress_map" value="false" />
 
 		<!--Evidential Grid stuff-->
