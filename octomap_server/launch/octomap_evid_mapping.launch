@@ -1,10 +1,11 @@
 <launch>
 	<param name="/use_sim_time" value="true"/>
+	
 	<!--RViz-->
 	<node type="rviz" name="rviz" pkg="rviz" args="-d octomap_conf.rviz" />
 
 	<!--Launch rosbag-->
-	<node pkg="rosbag" type="play" name="player" args="-r 0.03 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0005_synced.bag"> <!--past speed 0.07 (good)-->
+	<node pkg="rosbag" type="play" name="player" args="-r 0.07 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0005_synced.bag"> <!--past speed 0.07 (good)-->
 	</node>
 
 	<!--Yolo-->
@@ -56,6 +57,10 @@
 
 		<!--Darknet stuff-->
 		<remap from="bounding_boxes" to="/darknet_ros/bounding_boxes_adapted" />
+
+		<!--Tracklets stuff-->
+		<rosparam param="moving_tracklets"> ["Cyclist_1", "Van_1"] </rosparam>
+
 	</node> 
 	
 </launch> 

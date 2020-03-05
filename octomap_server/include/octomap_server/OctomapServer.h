@@ -295,6 +295,7 @@ protected:
   std::vector<std::string> m_classes;
   std::vector<int> m_bboxes_idx;
   std::vector<int> m_bboxes_conf;  // store idx of bbox has conflict cells
+  std::vector<std::string> m_moving_tracklets;
 
   // evid octree stuff
   float m_evid_lambdaOccupied;

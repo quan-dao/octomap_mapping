@@ -207,6 +207,8 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_classes.push_back("car");
   m_classes.push_back("bus");
   m_classes.push_back("truck");
+  // get manually labeled moving tracklets
+  m_nh_private.getParam("moving_tracklets", m_moving_tracklets); 
 #endif
   m_octomapBinaryService = m_nh.advertiseService("octomap_binary", &OctomapServer::octomapBinarySrv, this);
   m_octomapFullService = m_nh.advertiseService("octomap_full", &OctomapServer::octomapFullSrv, this);
@@ -317,6 +319,9 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
   std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
   std::cout<<"[INFO] Timestamp diff: Bbox vs info "<<(bbox_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
   std::cout<<"[INFO] Timestamp diff: Tracklets vs info "<<(tracklets_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
+  std::cout<<"[INFO] Moving tracklets list: ";
+  for(std::string s_ : m_moving_tracklets)
+    std::cout<<"                            "<<s_<<"\n";
 
   ros::WallTime tic = ros::WallTime::now();
   // update inComingTime of the octree
@@ -523,6 +528,11 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     std::vector<tf::Vector3> vertices;  // init 3D bbox vertices of each tracklet - TODO: clear this afterward
     int num_bbox = 0;
     for (kitti_msgs::TrackletInfo tracklet_ : tracklets_msg->info) {
+      // check if this tracklet is moving
+      std::vector<std::string>::const_iterator it_ = std::find(m_moving_tracklets.begin(), m_moving_tracklets.end(), tracklet_.objectType);
+      if (it_ == m_moving_tracklets.end()) // not found -> not moving
+        continue;
+
       // vertices is in tracklet local frame -> need to transform to velodyne frame
       vertices.push_back(tf::Vector3(tracklet_.l/2.0f, tracklet_.w/2.0f, 0.0f));
       vertices.push_back(tf::Vector3(tracklet_.l/2.0f, -tracklet_.w/2.0f, 0.0f));
@@ -564,6 +574,19 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
       if ((bbox_xmin < bbox_xmax) && (bbox_ymin < bbox_ymax)) {
         num_bbox++;
         cv::rectangle(image, cv::Point(bbox_xmin, bbox_ymin), cv::Point(bbox_xmax, bbox_ymax), CV_RGB(255, 0, 0), 3);
+        //
+        // Draw label
+        //
+        int baseline(0), thickness(2), fontScale(1);
+        cv::Size text_size = cv::getTextSize(tracklet_.objectType, cv::FONT_HERSHEY_SIMPLEX, fontScale, thickness, &baseline);
+        baseline += thickness;
+        // positioning the text
+        cv::Point text_org(bbox_xmin, std::max(bbox_ymin - baseline, 0));
+        // draw the box
+        int textBox_x = std::min(bbox_xmin + text_size.width, image.cols);
+        int textBox_y = std::max(bbox_ymin - 2*baseline - text_size.height, 0);
+        cv::rectangle(image, cv::Point(bbox_xmin, bbox_ymin), cv::Point(textBox_x, textBox_y), CV_RGB(0, 255, 0), -1);
+        cv::putText(image, tracklet_.objectType, text_org, cv::FONT_HERSHEY_SIMPLEX, fontScale, CV_RGB(255, 255, 255), thickness);
       }
 
       vertices.clear();
