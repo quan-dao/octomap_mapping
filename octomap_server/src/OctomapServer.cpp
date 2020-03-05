@@ -29,6 +29,52 @@
 
 #include <octomap_server/OctomapServer.h>
 
+
+class BBox2D {
+public:
+  BBox2D(int xmin_, int ymin_, int xmax_, int ymax_, std::string label_) : xmin(xmin_), ymin(ymin_) ,xmax(xmax_), ymax(ymax_), label(label_)
+  {
+    assert(xmax >= xmin);
+    assert(ymax >= ymin);
+  }
+
+  inline std::string getLabel() const {return label;}
+
+  // BBox in pixel coordinate is inclusive: inclusive, therefore must add 1 to both height & weight
+  inline int getWidth() const {return xmax - xmin + 1;}
+  inline int getHeight() const {return ymax - ymin + 1;}
+  inline int getArea() const {return getWidth() * getHeight();}
+  
+  int getIntersectionArea(const BBox2D& other) const
+  {
+    int x_left = std::max(xmin, other.xmin);  // take the  more right
+    int y_up = std::max(ymin, other.ymin); // take the lower
+    
+    int x_right = std::min(xmax, other.xmax);  // take teh more left
+    int y_down = std::min(ymax, other.ymax); // take the upper 
+
+    if ((x_right < x_left) || (y_down < y_up))
+      return 0;
+    else
+      return (x_right - x_left + 1) * (y_down - y_up + 1);
+  }
+
+  inline int getUnionArea(const BBox2D& other) const
+  {
+    return getArea() + other.getArea() - getIntersectionArea(other);
+  }
+
+  inline float getIoU(const BBox2D& other) const
+  {
+    return (float) getIntersectionArea(other) / (float) getUnionArea(other);
+  }
+
+protected:
+  int xmin, xmax, ymin, ymax;
+  std::string label;
+};
+
+
 using namespace octomap;
 using octomap_msgs::Octomap;
 
@@ -319,9 +365,6 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
   std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
   std::cout<<"[INFO] Timestamp diff: Bbox vs info "<<(bbox_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
   std::cout<<"[INFO] Timestamp diff: Tracklets vs info "<<(tracklets_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
-  std::cout<<"[INFO] Moving tracklets list: ";
-  for(std::string s_ : m_moving_tracklets)
-    std::cout<<"                            "<<s_<<"\n";
 
   ros::WallTime tic = ros::WallTime::now();
   // update inComingTime of the octree
@@ -465,6 +508,9 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
   fix_info.P[11] = 0;
   camera_model.fromCameraInfo(fix_info);
   
+  // vector to store predicted bbox of moving objects
+  std::vector<BBox2D> predicted_bboxes;
+
   if (!m_octree->getConflictCells().empty()) 
   { 
     // prepare vector of bboxes having conflict cells
@@ -507,15 +553,24 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     std::cout<<"[INFO] Drawing "<<m_bboxes_conf.size()<<" bounding boxes\n";
     for (int id_ : m_bboxes_conf) {
       cv::rectangle(image, cv::Point(bbox_msg->bounding_boxes[id_].xmin, bbox_msg->bounding_boxes[id_].ymin), 
-      cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 3);
+                            cv::Point(bbox_msg->bounding_boxes[id_].xmax, bbox_msg->bounding_boxes[id_].ymax), CV_RGB(0, 0, 255), 3);
+      predicted_bboxes.push_back(BBox2D(bbox_msg->bounding_boxes[id_].xmin, 
+                                        bbox_msg->bounding_boxes[id_].ymin, 
+                                        bbox_msg->bounding_boxes[id_].xmax, 
+                                        bbox_msg->bounding_boxes[id_].ymax,
+                                        bbox_msg->bounding_boxes[id_].Class));
     }
   }
   //
   // Draw tracklets
   //
-  // get transformation from veloToCam
+  
+  // vector to store predicted bbox of moving objects
+  std::vector<BBox2D> tracklets_bboxes;
+  
   if (!tracklets_msg->info.empty()) 
   {
+    // get transformation from veloToCam
     tf::StampedTransform veloToCamTf;
     try {
       m_tfListener.waitForTransform("camera_color_left", "velo_link", tracklets_msg->header.stamp, ros::Duration(0.1));
@@ -527,7 +582,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     // iterate all tracklets & project them on image plane
     std::vector<tf::Vector3> vertices;  // init 3D bbox vertices of each tracklet - TODO: clear this afterward
     int num_bbox = 0;
-    for (kitti_msgs::TrackletInfo tracklet_ : tracklets_msg->info) {
+    for (const kitti_msgs::TrackletInfo& tracklet_ : tracklets_msg->info) {
       // check if this tracklet is moving
       std::vector<std::string>::const_iterator it_ = std::find(m_moving_tracklets.begin(), m_moving_tracklets.end(), tracklet_.objectType);
       if (it_ == m_moving_tracklets.end()) // not found -> not moving
@@ -574,9 +629,10 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
       if ((bbox_xmin < bbox_xmax) && (bbox_ymin < bbox_ymax)) {
         num_bbox++;
         cv::rectangle(image, cv::Point(bbox_xmin, bbox_ymin), cv::Point(bbox_xmax, bbox_ymax), CV_RGB(255, 0, 0), 3);
-        //
-        // Draw label
-        //
+        // store tracklets bbox
+        tracklets_bboxes.push_back(BBox2D(bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, tracklet_.objectType));
+        
+        /// Draw label
         int baseline(0), thickness(2), fontScale(1);
         cv::Size text_size = cv::getTextSize(tracklet_.objectType, cv::FONT_HERSHEY_SIMPLEX, fontScale, thickness, &baseline);
         baseline += thickness;
@@ -594,6 +650,17 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     std::cout<<"[INFO] Drawed "<<num_bbox<<" 2D bboxes/"<<tracklets_msg->info.size()<<" tracklets\n";
   } else {
     std::cout<<"[INFO] There are no tracklets\n";
+  }
+  // compute IoU
+  std::cout<<"[INFO] Moving Tracklets IoU:\n";
+  for(const BBox2D& tracklet_bb : tracklets_bboxes) {
+    float max_iou = 0.0;
+    for(const BBox2D& pred_bb : predicted_bboxes) {
+      float iou_ = tracklet_bb.getIoU(pred_bb);
+      if (iou_ > max_iou)
+        max_iou = iou_;
+    }
+    std::cout<<"\t"<<tracklet_bb.getLabel()<<"\t"<<max_iou<<"\n";
   }
 
 #endif
