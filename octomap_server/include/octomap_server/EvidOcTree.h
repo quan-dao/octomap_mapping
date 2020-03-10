@@ -169,9 +169,9 @@ namespace octomap {
 	protected:
 		// Evidential Fusion constants
 		const float tau = 1.3f;  // time constant
-		const float lambda_occupied = 0.7f;
-		const float lambda_free = 0.7f;
-		const float conflict_thres = 0.5f;  // 0.35f
+		const float lambda_occupied = 0.75f;
+		const float lambda_free = 0.4f;
+		const float conflict_thres = 0.45f;  // 0.35f
 		std::vector<point3d> conflict_cells_center;
 		EvidMass basic_belief_occupied, basic_belief_free;
 

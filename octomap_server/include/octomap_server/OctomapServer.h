@@ -58,6 +58,9 @@
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/segmentation/extract_clusters.h>
+
 
 
 #include <tf/transform_listener.h>
@@ -75,6 +78,7 @@
 #include <octomap_server/EvidOcTree.h>
 
 #include <iostream>
+#include <cmath>
 
 //#define COLOR_OCTOMAP_SERVER // switch color here - easier maintenance, only maintain OctomapServer. Two targets are defined in the cmake, octomap_server_color and octomap_server. One has this defined, and the other doesn't
 
@@ -135,7 +139,6 @@ protected:
   void publishBinaryOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   void publishFullOctoMap(const ros::Time& rostime = ros::Time::now()) const;
   virtual void publishAll(const ros::Time& rostime = ros::Time::now());
-  void publishConfCells(const ros::Time& rostime = ros::Time::now());
 
   /**
   * @brief update occupancy map with a scan labeled as ground and nonground.
@@ -212,7 +215,7 @@ protected:
   static std_msgs::ColorRGBA heightMapColor(double h);
   ros::NodeHandle m_nh;
   ros::NodeHandle m_nh_private;
-  ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub, m_cmarkerPub;
+  ros::Publisher  m_markerPub, m_binaryMapPub, m_fullMapPub, m_pointCloudPub, m_collisionObjectPub, m_mapPub, m_cmapPub, m_fmapPub, m_fmarkerPub, m_cmarkerPub, m_pointcloudVisClusterPub;
   
   message_filters::Subscriber<sensor_msgs::PointCloud2>* m_pointCloudSub;
   tf::MessageFilter<sensor_msgs::PointCloud2>* m_tfPointCloudSub;
@@ -246,7 +249,6 @@ protected:
   bool m_latchedTopics;
   bool m_publishFreeSpace;
   bool m_publishConfCells;
-  bool m_publishConfCellsOnly;
 
   double m_res;
   unsigned m_treeDepth;
@@ -263,6 +265,10 @@ protected:
   double m_minSizeX;
   double m_minSizeY;
   bool m_filterSpeckles;
+
+  // for cluster filtering
+  double m_pointcloudClusterTolerance;
+  int m_pointcloudClusterSizeMin;
 
   bool m_filterGroundPlane;
   double m_groundFilterDistance;

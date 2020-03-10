@@ -54,7 +54,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_colorFactor(0.8),
   m_latchedTopics(true),
   m_publishFreeSpace(false),
-  m_publishConfCells(false), m_publishConfCellsOnly(false),
+  m_publishConfCells(false),
   m_res(0.05),
   m_treeDepth(0),
   m_maxTreeDepth(0),
@@ -64,6 +64,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_pointcloudMaxY(std::numeric_limits<double>::max()),
   m_pointcloudMinZ(-std::numeric_limits<double>::max()),
   m_pointcloudMaxZ(std::numeric_limits<double>::max()),
+  m_pointcloudClusterTolerance(0.02), m_pointcloudClusterSizeMin(100),
   m_occupancyMinZ(-std::numeric_limits<double>::max()),
   m_occupancyMaxZ(std::numeric_limits<double>::max()),
   m_minSizeX(0.0), m_minSizeY(0.0),
@@ -91,6 +92,10 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_nh_private.param("occupancy_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
   m_nh_private.param("min_x_size", m_minSizeX,m_minSizeX);
   m_nh_private.param("min_y_size", m_minSizeY,m_minSizeY);
+
+  // for filtering conflict cloud
+  m_nh_private.param("cluster_tolerance", m_pointcloudClusterTolerance, m_pointcloudClusterTolerance);
+  m_nh_private.param("cluster_size_min", m_pointcloudClusterSizeMin, m_pointcloudClusterSizeMin);
 
   m_nh_private.param("filter_speckles", m_filterSpeckles, m_filterSpeckles);
   m_nh_private.param("filter_ground", m_filterGroundPlane, m_filterGroundPlane);
@@ -161,7 +166,6 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
 
   m_nh_private.param("publish_free_space", m_publishFreeSpace, m_publishFreeSpace);
   m_nh_private.param("publish_conf_cells", m_publishConfCells, m_publishConfCells);
-  m_nh_private.param("publish_conf_cells_only", m_publishConfCellsOnly, m_publishConfCellsOnly);
 
   m_nh_private.param("latch", m_latchedTopics, m_latchedTopics);
   if (m_latchedTopics){
@@ -176,6 +180,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, m_latchedTopics);
   m_fmarkerPub = m_nh.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array", 1, m_latchedTopics);
   m_cmarkerPub = m_nh.advertise<visualization_msgs::Marker>("conf_cells_vis_array", 1, m_latchedTopics);
+  m_pointcloudVisClusterPub = m_nh.advertise<sensor_msgs::PointCloud2>("conf_cluster_cloud", 1, m_latchedTopics);
 
   m_pointCloudSub = new message_filters::Subscriber<sensor_msgs::PointCloud2> (m_nh, "cloud_in", 5);
   m_tfPointCloudSub = new tf::MessageFilter<sensor_msgs::PointCloud2> (*m_pointCloudSub, m_tfListener, m_worldFrameId, 5);
@@ -282,8 +287,8 @@ bool OctomapServer::openFile(const std::string& filename){
 void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::ConstPtr& cloud, const sensor_msgs::Image::ConstPtr& image_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg)
 {
   /// timestamp different
-  std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
-  std::cout<<"[INFO] Timestamp diff: image vs info "<<(image_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
+  // std::cout<<"[INFO] Timestamp diff: Cloud vs image "<<(cloud->header.stamp - image_msg->header.stamp).toSec()<<" sec\n";
+  // std::cout<<"[INFO] Timestamp diff: image vs info "<<(image_msg->header.stamp - info_msg->header.stamp).toSec()<<" sec\n";
 
   ros::WallTime tic = ros::WallTime::now();
   // update inComingTime of the octree
@@ -322,54 +327,44 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
   PCLPointCloud pc_ground; // segmented ground plane
   PCLPointCloud pc_nonground; // everything else
 
-  if (m_filterGroundPlane){
-    tf::StampedTransform sensorToBaseTf, baseToWorldTf;
-    try{
-      m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, ros::Duration(0.2));
-      m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, sensorToBaseTf);
-      m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, baseToWorldTf);
+  tf::StampedTransform sensorToBaseTf, baseToWorldTf;
+  try{
+    m_tfListener.waitForTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, ros::Duration(0.2));
+    m_tfListener.lookupTransform(m_baseFrameId, cloud->header.frame_id, cloud->header.stamp, sensorToBaseTf);
+    m_tfListener.lookupTransform(m_worldFrameId, m_baseFrameId, cloud->header.stamp, baseToWorldTf);
 
 
-    }catch(tf::TransformException& ex){
-      ROS_ERROR_STREAM( "Transform error for ground plane filter: " << ex.what() << ", quitting callback.\n"
-                        "You need to set the base_frame_id or disable filter_ground.");
-    }
+  }catch(tf::TransformException& ex){
+    ROS_ERROR_STREAM( "Transform error for ground plane filter: " << ex.what() << ", quitting callback.\n"
+                      "You need to set the base_frame_id or disable filter_ground.");
+  }
+
+  Eigen::Matrix4f sensorToBase, baseToWorld;
+  pcl_ros::transformAsMatrix(sensorToBaseTf, sensorToBase);
+  pcl_ros::transformAsMatrix(baseToWorldTf, baseToWorld);
+
+  // transform pointcloud from sensor frame to fixed robot frame
+  pcl::transformPointCloud(pc, pc, sensorToBase);
+  pass_x.setInputCloud(pc.makeShared());
+  pass_x.filter(pc);
+  pass_y.setInputCloud(pc.makeShared());
+  pass_y.filter(pc);
+  pass_z.setInputCloud(pc.makeShared());
+  pass_z.filter(pc);
 
 
-    Eigen::Matrix4f sensorToBase, baseToWorld;
-    pcl_ros::transformAsMatrix(sensorToBaseTf, sensorToBase);
-    pcl_ros::transformAsMatrix(baseToWorldTf, baseToWorld);
-
-    // transform pointcloud from sensor frame to fixed robot frame
-    pcl::transformPointCloud(pc, pc, sensorToBase);
-    pass_x.setInputCloud(pc.makeShared());
-    pass_x.filter(pc);
-    pass_y.setInputCloud(pc.makeShared());
-    pass_y.filter(pc);
-    pass_z.setInputCloud(pc.makeShared());
-    pass_z.filter(pc);
+  if (m_filterGroundPlane){    
     filterGroundPlane(pc, pc_ground, pc_nonground);
-
-    // transform clouds to world frame for insertion
-    pcl::transformPointCloud(pc_ground, pc_ground, baseToWorld);
-    pcl::transformPointCloud(pc_nonground, pc_nonground, baseToWorld);
   } else {
-    // directly transform to map frame:
-    pcl::transformPointCloud(pc, pc, sensorToWorld);
-
-    // just filter height range:
-    pass_x.setInputCloud(pc.makeShared());
-    pass_x.filter(pc);
-    pass_y.setInputCloud(pc.makeShared());
-    pass_y.filter(pc);
-    pass_z.setInputCloud(pc.makeShared());
-    pass_z.filter(pc);
-
     pc_nonground = pc;
     // pc_nonground is empty without ground segmentation
     pc_ground.header = pc.header;
     pc_nonground.header = pc.header;
   }
+
+  // transform clouds to world frame for insertion
+  pcl::transformPointCloud(pc_ground, pc_ground, baseToWorld);
+  pcl::transformPointCloud(pc_nonground, pc_nonground, baseToWorld);
 
 
   insertScan(sensorToWorldTf.getOrigin(), pc_ground, pc_nonground);
@@ -377,6 +372,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
 #ifndef COLOR_OCTOMAP_SERVER
   std::cout<<"[INFO] Detect "<<m_octree->getConflictCells().size()<<" conflict cells\n";
 #endif
+
   //
   // draw conflict cells
   //
@@ -397,6 +393,11 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
   } catch (tf::TransformException& ex) {
     ROS_ERROR("Fail to find worldToCam transform due %s\nExiting callback", ex.what());
   }
+
+  /// init a cloud for visualizing cluster
+  pcl::PointCloud<pcl::PointXYZRGB> visClusterCloud;
+  visClusterCloud.header.stamp = pc.header.stamp;
+  visClusterCloud.header.frame_id = m_worldFrameId;
 #ifndef COLOR_OCTOMAP_SERVER
   if (!m_octree->getConflictCells().empty()) {
     // get camera model
@@ -404,7 +405,21 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
     fix_info.P[11] = 0;
     camera_model.fromCameraInfo(fix_info);
     
+    /// init cloud of conflict cells
+    pcl::PointCloud<pcl::PointXYZ>::Ptr confCloud (new pcl::PointCloud<pcl::PointXYZ>);
+    confCloud->header.stamp = pc.header.stamp;
+    confCloud->header.frame_id = m_worldFrameId;
+    confCloud->width = m_octree->getConflictCells().size();
+    confCloud->height = 1;  // unorganized cloud
+    confCloud->points.resize(confCloud->width);
+
+    std::size_t confCloud_idx = 0;
     for (point3d p_ :  m_octree->getConflictCells()) {
+      // add conf cell to confCloud
+      confCloud->points[confCloud_idx].x = p_.x();
+      confCloud->points[confCloud_idx].y = p_.y();
+      confCloud->points[confCloud_idx].z = p_.z();
+      
       // get conf cell world coordinate
       tf::Vector3 wp;
       wp.setX((tfScalar) p_.x());
@@ -422,15 +437,84 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
         // draw
         cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
       }
+
+      // update confCloud_idx
+      confCloud_idx++;
+    }  // end of draw conf cell
+
+    //
+    // cluster in confCloud
+    //
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr confTree (new pcl::search::KdTree<pcl::PointXYZ>);
+    confTree->setInputCloud(confCloud);
+    std::cout<<"[INFO] Kd Tree created\n";
+    std::vector<pcl::PointIndices> confCluster_indices;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> conf_ec;
+    conf_ec.setClusterTolerance(m_pointcloudClusterTolerance);  // 0.2m
+    conf_ec.setMinClusterSize(m_pointcloudClusterSizeMin);
+    conf_ec.setMaxClusterSize(confCloud->points.size());
+    conf_ec.setSearchMethod(confTree);
+    conf_ec.setInputCloud(confCloud);
+    conf_ec.extract(confCluster_indices);
+    std::cout<<"[INFO] Number of clusters in conflict cloud: "<<confCluster_indices.size()<<"\n";
+
+    // visualize cluster
+    if (!confCluster_indices.empty()) {
+      int clust_idx = 0;
+      // visClusterCloud.width = confCloud->width;  // wrong since there are some conflict cells that don't belong to any cluster
+      visClusterCloud.height = 1;
+      for (std::vector<pcl::PointIndices>::const_iterator it = confCluster_indices.begin(); it != confCluster_indices.end(); ++it) {
+        for(std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit) {
+          pcl::PointXYZRGB p_;
+          p_.x = confCloud->points[*pit].x;
+          p_.y = confCloud->points[*pit].y;
+          p_.z = confCloud->points[*pit].z;
+          p_.r = 0;
+          p_.g = 0;
+          p_.b = 0;
+          if ((clust_idx % 6) ==0)
+            p_.r = 255;
+          if ((clust_idx % 6) ==1)
+            p_.g = 255;
+          if ((clust_idx % 6) ==2)
+            p_.b = 255;
+          if ((clust_idx % 6) ==3) {
+            p_.r = 255;
+            p_.g = 255;
+          }
+          if ((clust_idx % 6) ==4) {
+            p_.r = 255;
+            p_.b = 255;
+          }
+          if ((clust_idx % 6) ==5) {
+            p_.b = 255;
+            p_.g = 255;
+          }
+          visClusterCloud.points.push_back(p_);
+        }
+        // finish adding 1 cluster, update clust_idx
+        clust_idx++;
+      }
+      visClusterCloud.width = visClusterCloud.points.size();
     }
   }
 #endif
+  
+  // publish draw image
   m_image_pub.publish(input_bridge->toImageMsg());
-
+  
+  // // publish clustered cloud
+  sensor_msgs::PointCloud2 visClusterCloud_msg;
+  pcl::toROSMsg(visClusterCloud, visClusterCloud_msg);
+  visClusterCloud_msg.header.frame_id = m_worldFrameId;
+  visClusterCloud_msg.header.stamp = cloud->header.stamp;
+  m_pointcloudVisClusterPub.publish(visClusterCloud_msg);
+  
+  
   // can't run in real-time anyway why not publish every thing
   tic = ros::WallTime::now();
   publishAll(cloud->header.stamp);
-  std::cout<<"[INFO] publishAll takes "<<(ros::WallTime::now() - tic).toSec()<<" sec\n";
+  // std::cout<<"[INFO] publishAll takes "<<(ros::WallTime::now() - tic).toSec()<<" sec\n";
   std::cout<<"-------------------------------------------------------------\n";
 }
 
@@ -524,11 +608,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2::ConstPtr
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   ROS_DEBUG("Pointcloud insertion in OctomapServer done (%zu+%zu pts (ground/nonground), %f sec)", pc_ground.size(), pc_nonground.size(), total_elapsed);
 
-  if (m_publishConfCellsOnly) {
-    publishConfCells(cloud->header.stamp);
-  } else {
-    publishAll(cloud->header.stamp);
-  }
+  publishAll(cloud->header.stamp);
 }
 
 void OctomapServer::insertScan(const tf::Point& sensorOriginTf, const PCLPointCloud& ground, const PCLPointCloud& nonground){
@@ -940,65 +1020,6 @@ void OctomapServer::publishAll(const ros::Time& rostime){
   ROS_DEBUG("Map publishing in OctomapServer took %f sec", total_elapsed);
 
 }
-
-
-void OctomapServer::publishConfCells(const ros::Time& rostime)
-{
-  size_t octomapSize = m_octree->size();
-  // TODO: estimate num occ. voxels for size of arrays (reserve)
-  if (octomapSize <= 1){
-    ROS_WARN("Nothing to publish, octree is empty");
-    return;
-  }
-  //bool publishConfMarkerArray = m_publishConfCells && (m_latchedTopics || m_cmarkerPub.getNumSubscribers() > 0);
-  bool publishConfMarkerArray = true;
-  // init markers:
-  visualization_msgs::Marker confNodesVis;
-  // making ConfMarkerArray
-#ifndef COLOR_OCTOMAP_SERVER
-  if (publishConfMarkerArray){
-    // add cells center
-    std::vector<point3d> cells_center = m_octree->getConflictCells();
-    for (point3d c : cells_center){
-      geometry_msgs::Point p;
-      p.x = c.x();
-      p.y = c.y();
-      p.z = c.z();
-      confNodesVis.points.push_back(p);
-    }
-
-    //
-    // clear conflict cells for next pointcloud insertion
-    //
-    m_octree->clearConfictCells();
-
-    // finish ConfMarkerArray
-    std_msgs::ColorRGBA _color_conf;
-    _color_conf.r = 255.0;
-    _color_conf.g = 0.0;
-    _color_conf.b = 0.0;
-    _color_conf.a = 1.0;
-
-    confNodesVis.header.frame_id = m_worldFrameId;
-    confNodesVis.header.stamp = rostime;
-    confNodesVis.ns = "map";
-    confNodesVis.id = 0;
-    confNodesVis.type = visualization_msgs::Marker::CUBE_LIST;
-    confNodesVis.scale.x = m_res;
-    confNodesVis.scale.y = m_res;
-    confNodesVis.scale.z = m_res;
-    confNodesVis.color = m_color;
-
-    if (confNodesVis.points.size() > 0)
-      confNodesVis.action = visualization_msgs::Marker::ADD;
-    else
-      confNodesVis.action = visualization_msgs::Marker::DELETE;
-
-    m_cmarkerPub.publish(confNodesVis);
-  }
-#endif
-}
-
 
 bool OctomapServer::octomapBinarySrv(OctomapSrv::Request  &req,
                                     OctomapSrv::Response &res)
