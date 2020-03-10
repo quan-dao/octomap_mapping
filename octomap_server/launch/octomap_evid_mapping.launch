@@ -1,12 +1,15 @@
 <launch>
 	<param name="/use_sim_time" value="true"/>
+	<!--RViz-->
+	<node type="rviz" name="rviz" pkg="rviz" args="-d octomap_conf_cluster.rviz" />
+
 	<!--Launch rosbag-->
-	<node pkg="rosbag" type="play" name="player" args="-r 0.01 --clock /home/mquan/Downloads/KITTI/kitti_2011_09_26_drive_0005_synced.bag">
+	<node pkg="rosbag" type="play" name="player" args="-r 0.05 --clock /home/mqdao/Downloads/KITTI/kitti_2011_09_26_drive_0051_synced.bag">
 	</node>
 	
 	<!-- Octomapping -->
 	<node pkg="octomap_server" type="octomap_server_node" name="octomap_server" output="screen">
-		<param name="resolution" value="0.1" />
+		<param name="resolution" value="0.15" /> <!--past good: 0.1-->
 		
 		<!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
 		<param name="frame_id" type="string" value="world" />
@@ -18,7 +21,7 @@
 		<param name="latch" value="false" />
 		
 		<!-- filter ground -->
-		<param name="filter_ground" value="true" />
+		<param name="filter_ground" value="false" />
 		<param name="ground_filter/distance" value="0.15" />
 		<param name="ground_filter/angle" value="0.2" />
 		<param name="ground_filter/plane_distance" value="0.1" />
@@ -31,9 +34,13 @@
 
 		<param name="pointcloud_min_x" value="0.0" />
 		<param name="pointcloud_min_y" value="-10.0" />
-		<param name="pointcloud_max_y" value="10.0" />
-		<param name="pointcloud_min_z" value="0.0" />
+		<param name="pointcloud_max_y" value="5.0" />
+		<param name="pointcloud_min_z" value="0.35" />
 		<param name="pointcloud_max_z" value="3.5" />
+
+		<!-- for clustering conflict cloud-->
+		<param name="cluster_tolerance" value="1.15" /> <!--0.75 -> 7 clusters-->
+		<param name="cluster_size_min" value="10" />
 
 		<!--to visualize conflict cells-->
 		<param name="publish_conf_cells" value="true" />
