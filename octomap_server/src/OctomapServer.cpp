@@ -65,6 +65,7 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   m_pointcloudMinZ(-std::numeric_limits<double>::max()),
   m_pointcloudMaxZ(std::numeric_limits<double>::max()),
   m_pointcloudClusterTolerance(0.02), m_pointcloudClusterSizeMin(100),
+  m_treeLambdaFree(0.4), m_treeLambdaOccupied(0.75), m_treeConflictThres(0.45), m_treeTau(1.3),
   m_occupancyMinZ(-std::numeric_limits<double>::max()),
   m_occupancyMaxZ(std::numeric_limits<double>::max()),
   m_minSizeX(0.0), m_minSizeY(0.0),
@@ -96,6 +97,12 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   // for filtering conflict cloud
   m_nh_private.param("cluster_tolerance", m_pointcloudClusterTolerance, m_pointcloudClusterTolerance);
   m_nh_private.param("cluster_size_min", m_pointcloudClusterSizeMin, m_pointcloudClusterSizeMin);
+
+  // for conflict cells
+  m_nh_private.param("evidTree/lambda_free", m_treeLambdaFree, m_treeLambdaFree);
+  m_nh_private.param("evidTree/lambda_occupied", m_treeLambdaOccupied, m_treeLambdaOccupied);
+  m_nh_private.param("evidTree/conf_thres", m_treeConflictThres, m_treeConflictThres);
+  m_nh_private.param("evidTree/tau", m_treeTau, m_treeTau);
 
   m_nh_private.param("filter_speckles", m_filterSpeckles, m_filterSpeckles);
   m_nh_private.param("filter_ground", m_filterGroundPlane, m_filterGroundPlane);
@@ -136,7 +143,12 @@ OctomapServer::OctomapServer(const ros::NodeHandle private_nh_, const ros::NodeH
   }
 
   // initialize octomap object & params
+#ifdef COLOR_OCTOMAP_SERVER
   m_octree = new OcTreeT(m_res);
+#else
+  m_octree = new OcTreeT(m_res, m_treeLambdaFree, m_treeLambdaOccupied, m_treeConflictThres, m_treeTau);
+  // m_octree = new OcTreeT(m_res);
+#endif
   m_octree->setProbHit(probHit);
   m_octree->setProbMiss(probMiss);
   m_octree->setClampingThresMin(thresMin);
@@ -435,7 +447,7 @@ void OctomapServer::insertCloudCallbackSync(const sensor_msgs::PointCloud2::Cons
         cv::Point2d uv;
         uv = camera_model.project3dToPixel(cp_cv);
         // draw
-        cv::circle(image, uv, 10, CV_RGB(255, 0, 0), -1);
+        cv::circle(image, uv, 10, CV_RGB(255, 0, 0));
       }
 
       // update confCloud_idx

@@ -135,6 +135,7 @@ namespace octomap {
 	public:
 		/// Default constructor: set resolution of leaves
 		EvidOcTree(double resolution);
+		EvidOcTree(double resolution, float lambda_free_, float lambda_occupied_, float conf_thres_, float tau_);
 		/// Virtual constructor creates a new object of the same type
 		EvidOcTree* create() const {return new EvidOcTree(resolution);}
 
@@ -168,10 +169,10 @@ namespace octomap {
 
 	protected:
 		// Evidential Fusion constants
-		const float tau = 1.3f;  // time constant
-		const float lambda_occupied = 0.75f;
-		const float lambda_free = 0.4f;
-		const float conflict_thres = 0.45f;  // 0.35f
+		const float tau;  // time constant
+		const float lambda_occupied;
+		const float lambda_free;
+		const float conflict_thres;  // 0.35f
 		std::vector<point3d> conflict_cells_center;
 		EvidMass basic_belief_occupied, basic_belief_free;
 

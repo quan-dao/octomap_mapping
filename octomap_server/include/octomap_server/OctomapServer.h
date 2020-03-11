@@ -270,6 +270,12 @@ protected:
   double m_pointcloudClusterTolerance;
   int m_pointcloudClusterSizeMin;
 
+  // for conflict cells
+  double m_treeLambdaFree;
+  double m_treeLambdaOccupied;
+  double m_treeConflictThres;
+  double m_treeTau;
+
   bool m_filterGroundPlane;
   double m_groundFilterDistance;
   double m_groundFilterAngle;

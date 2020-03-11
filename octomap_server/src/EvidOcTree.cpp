@@ -40,11 +40,29 @@ EvidOcTree::StaticMemberInitializer EvidOcTree::evidOcTreeMemberInit;
 
 EvidOcTree::EvidOcTree(double in_resolution) :
 	OccupancyOcTreeBase<EvidOcTreeNode>(in_resolution),
+	lambda_occupied(0.75), 
+	lambda_free(0.4),
+	conflict_thres(0.45),
+	tau(1.3),
 	basic_belief_occupied(0.0f, lambda_occupied, 1.0f-lambda_occupied),
 	basic_belief_free(lambda_free, 0.0f, 1.0f-lambda_free)
 	{
 		evidOcTreeMemberInit.ensureLinking();
 	};
+
+EvidOcTree::EvidOcTree(double resolution_, float lambda_free_, float lambda_occupied_, float conf_thres_, float tau_)
+: 
+OccupancyOcTreeBase<EvidOcTreeNode>(resolution_),
+lambda_free(lambda_free_),
+lambda_occupied(lambda_occupied_),
+conflict_thres(conf_thres_),
+tau(tau_),
+basic_belief_occupied(0.0f, lambda_occupied, 1.0f-lambda_occupied),
+basic_belief_free(lambda_free, 0.0f, 1.0f-lambda_free)
+{
+	std::cout<<"Setting up EvidOcTree\n"<<"\tlambda free: "<<lambda_free<<"\n"<<"\tlambda occupied: "<<lambda_occupied<<"\n"<<"\tconflict thres: "<<conflict_thres<<"\n"<<"\ttau: "<<tau<<"\n";
+	evidOcTreeMemberInit.ensureLinking();
+}
 
 
 EvidOcTreeNode* EvidOcTree::updateNode(const OcTreeKey& key, bool occupied, bool lazy_eval) {
